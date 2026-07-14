@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
-from app.api import demo, stream
+from app.api import admin, auth, demo, stream
 from app.core.config import settings
 from app.core.database import engine
 
@@ -35,5 +35,7 @@ def health() -> dict:
 
 
 # 라우터 등록
+app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
 app.include_router(stream.router, prefix="/api", tags=["stream"])
 app.include_router(demo.router, prefix="/api/demo", tags=["demo"])

@@ -1,4 +1,5 @@
 import { onUnmounted, ref } from 'vue'
+import { tokens } from '@/lib/http'
 
 export interface CoinUpdate {
   type: 'coin.updated'
@@ -8,23 +9,25 @@ export interface CoinUpdate {
 }
 
 /**
- * 쫄병 코인 잔액을 SSE로 실시간 구독하는 컴포저블.
+ * 로그인한 사용자의 실시간 이벤트를 SSE로 구독하는 컴포저블.
  *
- * EventSource는 연결이 끊기면 자동 재연결한다. (기획서 9장 참고)
- * PoC 단계라 user_id/group_id/role을 query로 넘긴다 — 추후 JWT로 교체.
+ * EventSource는 헤더를 실을 수 없어 access token을 query(`token`)로 전달한다.
+ * 연결이 끊기면 EventSource가 자동 재연결한다. (기획서 9장)
  */
 export function useCoinStream() {
   const balance = ref<number>(0)
   const connected = ref(false)
   const lastReason = ref<string | null>(null)
   const lastDelta = ref<number | null>(null)
+  const approved = ref(false) // 승인 이벤트 수신 여부
 
   let es: EventSource | null = null
 
-  function connect(userId: number, groupId: number, role = 'minion') {
+  function connect() {
     disconnect()
-    const url = `/api/stream?user_id=${userId}&group_id=${groupId}&role=${role}`
-    es = new EventSource(url)
+    const token = tokens.access
+    if (!token) return
+    es = new EventSource(`/api/stream?token=${encodeURIComponent(token)}`)
 
     es.addEventListener('ready', () => {
       connected.value = true
@@ -35,6 +38,10 @@ export function useCoinStream() {
       balance.value = data.balance
       lastDelta.value = data.delta
       lastReason.value = data.reason
+    })
+
+    es.addEventListener('minion.approved', () => {
+      approved.value = true
     })
 
     es.onerror = () => {
@@ -51,5 +58,5 @@ export function useCoinStream() {
 
   onUnmounted(disconnect)
 
-  return { balance, connected, lastReason, lastDelta, connect, disconnect }
+  return { balance, connected, lastReason, lastDelta, approved, connect, disconnect }
 }

@@ -48,3 +48,132 @@ body,
 * {
   box-sizing: border-box;
 }
+
+/* ─── 공용 컴포넌트 클래스 (전 화면 공유) ─── */
+.jc-shell {
+  max-width: 30rem;
+  margin: 0 auto;
+  padding: 22px 18px 96px; /* 하단 탭바 공간 */
+  min-height: 100vh;
+}
+
+.jc-card {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  padding: 20px 18px;
+}
+
+.jc-eyebrow {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(255, 107, 91, 0.1);
+  color: var(--coral-deep);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.jc-title {
+  font-family: var(--font-display);
+  color: var(--ink);
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+.jc-label {
+  display: block;
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+.jc-label .opt {
+  font-weight: 500;
+  color: var(--ink-faint);
+}
+
+.jc-input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 2px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 15px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.jc-input::placeholder {
+  color: #b6bfcc;
+}
+.jc-input:focus {
+  border-color: var(--gold);
+}
+
+.jc-btn {
+  width: 100%;
+  padding: 14px;
+  border: none;
+  border-radius: 15px;
+  font-family: var(--font-display);
+  font-size: 17px;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition:
+    transform 0.12s,
+    filter 0.15s,
+    box-shadow 0.15s;
+}
+.jc-btn:active:not(:disabled) {
+  transform: translateY(2px);
+}
+.jc-btn:disabled {
+  filter: grayscale(0.4);
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.jc-btn--primary {
+  background: var(--coral);
+  color: #fff;
+  box-shadow: 0 8px 18px -10px rgba(240, 79, 62, 0.65);
+}
+.jc-btn--primary:hover:not(:disabled) {
+  filter: brightness(1.04);
+}
+.jc-btn--gold {
+  background: var(--gold);
+  color: #6b4208;
+  box-shadow: 0 8px 18px -10px rgba(232, 149, 43, 0.7);
+}
+.jc-btn--ghost {
+  background: #fff;
+  color: var(--ink-soft);
+  border: 2px solid var(--line-strong);
+}
+
+.jc-error {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--coral-deep);
+  font-weight: 600;
+}
+
+.jc-muted {
+  color: var(--ink-soft);
+}
+
+:focus-visible {
+  outline: 3px solid var(--gold);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
