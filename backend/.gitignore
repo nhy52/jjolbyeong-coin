@@ -1,0 +1,15 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Env / secrets
+.env
+
+# Uploads (local image storage)
+uploads/
+
+# OS
+.DS_Store
+Thumbs.db
