@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { marketApi, type Order, type Product } from '@/api/market'
+import {
+  marketApi,
+  type Order,
+  type Product,
+  type ProductRequest,
+  type ProductRequestInput,
+} from '@/api/market'
 import { useMarketStream } from '@/composables/useMarketStream'
 import { useAuthStore } from '@/stores/auth'
 import { ApiError } from '@/lib/http'
@@ -9,10 +15,24 @@ const auth = useAuthStore()
 
 const products = ref<Product[]>([])
 const myOrders = ref<Order[]>([])
+const myRequests = ref<ProductRequest[]>([])
 const loading = ref(true)
 const balance = ref(auth.user?.balance ?? 0)
 
-const tab = ref<'shop' | 'orders'>('shop')
+const tab = ref<'shop' | 'orders' | 'requests'>('shop')
+
+// 상품 신청 폼
+const showReqForm = ref(false)
+const reqForm = ref<{
+  name: string
+  desired_price: number
+  description: string
+  reference_url: string
+  image_url: string | null
+}>({ name: '', desired_price: 100, description: '', reference_url: '', image_url: null })
+const reqUploading = ref(false)
+const reqSubmitting = ref(false)
+const reqError = ref('')
 
 // 구매 시트
 const selected = ref<Product | null>(null)
@@ -25,9 +45,14 @@ const onSale = computed(() => products.value.filter((p) => p.status !== 'hidden'
 async function load() {
   loading.value = true
   try {
-    const [ps, os] = await Promise.all([marketApi.shop(), marketApi.myOrders()])
+    const [ps, os, rs] = await Promise.all([
+      marketApi.shop(),
+      marketApi.myOrders(),
+      marketApi.myRequests(),
+    ])
     products.value = ps
     myOrders.value = os
+    myRequests.value = rs
   } finally {
     loading.value = false
   }
@@ -47,6 +72,10 @@ const { connect } = useMarketStream({
   onProductUpdated: upsertProduct,
   onProductDeleted: (id) => {
     products.value = products.value.filter((p) => p.id !== id)
+  },
+  onRequestUpdated: (r) => {
+    const i = myRequests.value.findIndex((x) => x.id === r.id)
+    if (i >= 0) myRequests.value[i] = r
   },
 })
 
@@ -88,6 +117,73 @@ const statusLabel: Record<string, string> = {
   canceled: '취소됨',
 }
 
+const reqStatusLabel: Record<string, string> = {
+  pending: '검토 대기',
+  approved: '승인됨',
+  rejected: '거절됨',
+}
+
+const pendingReqCount = computed(
+  () => myRequests.value.filter((r) => r.status === 'pending').length,
+)
+
+function openReqForm() {
+  reqForm.value = {
+    name: '',
+    desired_price: 100,
+    description: '',
+    reference_url: '',
+    image_url: null,
+  }
+  reqError.value = ''
+  showReqForm.value = true
+}
+function closeReqForm() {
+  showReqForm.value = false
+}
+
+async function onReqFile(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  reqUploading.value = true
+  reqError.value = ''
+  try {
+    const { image_url } = await marketApi.uploadImage(file)
+    reqForm.value.image_url = image_url
+  } catch (err) {
+    reqError.value = err instanceof Error ? err.message : '이미지 업로드에 실패했어요.'
+  } finally {
+    reqUploading.value = false
+    input.value = ''
+  }
+}
+
+async function submitRequest() {
+  if (!reqForm.value.name.trim() || reqForm.value.desired_price <= 0) {
+    reqError.value = '상품 이름과 희망 가격(1 이상)을 입력해 주세요.'
+    return
+  }
+  reqSubmitting.value = true
+  reqError.value = ''
+  const payload: ProductRequestInput = {
+    name: reqForm.value.name.trim(),
+    desired_price: reqForm.value.desired_price,
+    description: reqForm.value.description.trim() || null,
+    reference_url: reqForm.value.reference_url.trim() || null,
+    image_url: reqForm.value.image_url,
+  }
+  try {
+    const created = await marketApi.createRequest(payload)
+    myRequests.value.unshift(created)
+    closeReqForm()
+  } catch (e) {
+    reqError.value = e instanceof ApiError ? e.message : '신청에 실패했어요.'
+  } finally {
+    reqSubmitting.value = false
+  }
+}
+
 onMounted(async () => {
   await load()
   connect()
@@ -107,6 +203,9 @@ onMounted(async () => {
       </button>
       <button class="seg__btn" :class="{ 'seg__btn--on': tab === 'orders' }" @click="tab = 'orders'">
         내 구매 <span v-if="myOrders.length" class="seg__count">{{ myOrders.length }}</span>
+      </button>
+      <button class="seg__btn" :class="{ 'seg__btn--on': tab === 'requests' }" @click="tab = 'requests'">
+        상품신청 <span v-if="pendingReqCount" class="seg__count">{{ pendingReqCount }}</span>
       </button>
     </div>
 
@@ -137,7 +236,7 @@ onMounted(async () => {
     </template>
 
     <!-- 내 구매 -->
-    <template v-else>
+    <template v-else-if="tab === 'orders'">
       <p v-if="!myOrders.length" class="empty">아직 구매한 상품이 없어요.</p>
       <div v-for="o in myOrders" :key="o.id" class="order">
         <div class="order__thumb">
@@ -149,6 +248,28 @@ onMounted(async () => {
           <small class="order__meta">🪙 {{ o.price_paid.toLocaleString() }}</small>
         </div>
         <span class="chip" :class="`chip--${o.status}`">{{ statusLabel[o.status] }}</span>
+      </div>
+    </template>
+
+    <!-- 상품 신청 -->
+    <template v-else>
+      <button class="req-add" @click="openReqForm">＋ 갖고 싶은 상품 신청하기</button>
+      <p class="req-hint">대장에게 마켓에 올려달라고 요청해요. 승인되면 상점에 등록돼요.</p>
+
+      <p v-if="!myRequests.length" class="empty">아직 신청한 상품이 없어요.</p>
+      <div v-for="r in myRequests" :key="r.id" class="req">
+        <div class="req__thumb">
+          <img v-if="r.image_url" :src="r.image_url" :alt="r.name" />
+          <span v-else>📝</span>
+        </div>
+        <div class="req__info">
+          <b class="req__name">{{ r.name }}</b>
+          <small class="req__meta">희망가 🪙 {{ r.desired_price.toLocaleString() }}</small>
+          <small v-if="r.status === 'rejected' && r.reject_reason" class="req__reason">
+            사유: {{ r.reject_reason }}
+          </small>
+        </div>
+        <span class="chip" :class="`chip--req-${r.status}`">{{ reqStatusLabel[r.status] }}</span>
       </div>
     </template>
 
@@ -191,6 +312,64 @@ onMounted(async () => {
             <p class="done__balance">남은 코인 🪙 {{ balance.toLocaleString() }}</p>
             <button class="jc-btn jc-btn--primary sheet__submit" @click="closeBuy">확인</button>
           </div>
+        </div>
+      </div>
+    </transition>
+
+    <!-- 상품 신청 시트 -->
+    <transition name="sheet">
+      <div v-if="showReqForm" class="sheet-wrap" @click.self="closeReqForm">
+        <div class="sheet">
+          <div class="sheet__grab" />
+          <p class="sheet__title">상품 신청하기</p>
+
+          <button type="button" class="uploader" @click="($refs.reqFile as HTMLInputElement).click()">
+            <img v-if="reqForm.image_url" :src="reqForm.image_url" alt="참고 이미지" class="uploader__img" />
+            <span v-else class="uploader__ph">{{ reqUploading ? '업로드 중…' : '📷 참고 이미지 (선택)' }}</span>
+            <span v-if="reqForm.image_url && !reqUploading" class="uploader__edit">변경</span>
+          </button>
+          <input ref="reqFile" type="file" accept="image/*" hidden @change="onReqFile" />
+
+          <label class="jc-label">상품 이름</label>
+          <input v-model="reqForm.name" class="jc-input" placeholder="예: 레고 시티 소방서" maxlength="100" />
+
+          <label class="jc-label">희망 가격(코인)</label>
+          <input
+            v-model.number="reqForm.desired_price"
+            class="jc-input"
+            type="number"
+            min="1"
+            inputmode="numeric"
+          />
+
+          <label class="jc-label">신청 사유 <span class="opt">(선택)</span></label>
+          <textarea
+            v-model="reqForm.description"
+            class="jc-input area"
+            rows="2"
+            placeholder="왜 이 상품을 갖고 싶은지 적어주세요"
+            maxlength="2000"
+          />
+
+          <label class="jc-label">참고 링크 <span class="opt">(선택)</span></label>
+          <input
+            v-model="reqForm.reference_url"
+            class="jc-input"
+            type="url"
+            placeholder="https://..."
+            maxlength="500"
+          />
+
+          <p v-if="reqError" class="jc-error">{{ reqError }}</p>
+
+          <button
+            class="jc-btn jc-btn--primary sheet__submit"
+            :disabled="reqSubmitting || reqUploading"
+            @click="submitRequest"
+          >
+            {{ reqSubmitting ? '신청 중…' : '대장에게 신청' }}
+          </button>
+          <button class="jc-btn jc-btn--ghost" @click="closeReqForm">취소</button>
         </div>
       </div>
     </transition>
@@ -389,6 +568,144 @@ onMounted(async () => {
   background: #f1f3f6;
   color: var(--ink-faint);
 }
+.chip--req-pending {
+  background: rgba(255, 201, 60, 0.18);
+  color: var(--gold-edge);
+}
+.chip--req-approved {
+  background: rgba(35, 194, 116, 0.15);
+  color: #0f8f52;
+}
+.chip--req-rejected {
+  background: #ffe9e5;
+  color: var(--coral-deep);
+}
+
+/* 상품 신청 */
+.req-add {
+  width: 100%;
+  border: none;
+  background: var(--coral);
+  color: #fff;
+  font-family: var(--font-display);
+  font-size: 15px;
+  padding: 13px 0;
+  border-radius: 14px;
+  cursor: pointer;
+  box-shadow: 0 6px 14px -8px rgba(240, 79, 62, 0.7);
+}
+.req-add:active {
+  transform: translateY(1px);
+}
+.req-hint {
+  margin: 10px 2px 16px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-faint);
+  text-align: center;
+}
+.req {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 13px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  margin-bottom: 8px;
+}
+.req__thumb {
+  width: 46px;
+  height: 46px;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #eef3ff, #e3ebfb);
+  overflow: hidden;
+  font-size: 22px;
+  flex-shrink: 0;
+}
+.req__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.req__info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.req__name {
+  font-size: 14.5px;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.req__meta {
+  font-size: 12.5px;
+  color: var(--ink-faint);
+}
+.req__reason {
+  font-size: 12px;
+  color: var(--coral-deep);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 신청 폼 (BossMarket 폼 스타일과 동일 톤) */
+.uploader {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 2px dashed var(--line-strong);
+  border-radius: 16px;
+  background: #faf8f4;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  overflow: hidden;
+  position: relative;
+  margin-bottom: 14px;
+}
+.uploader__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.uploader__ph {
+  color: var(--ink-faint);
+  font-weight: 700;
+  font-size: 14px;
+}
+.uploader__edit {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  background: rgba(22, 32, 46, 0.72);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+.area {
+  resize: none;
+  font-family: var(--font-body);
+  line-height: 1.5;
+}
+.opt {
+  color: var(--ink-faint);
+  font-weight: 400;
+}
+.sheet__title {
+  margin: 0 0 14px;
+  font-family: var(--font-display);
+  font-size: 18px;
+  color: var(--ink);
+}
 
 /* 바텀시트 */
 .sheet-wrap {
@@ -407,6 +724,8 @@ onMounted(async () => {
   border-radius: 26px 26px 0 0;
   padding: 10px 20px calc(24px + env(safe-area-inset-bottom));
   box-shadow: 0 -12px 40px -12px rgba(22, 32, 46, 0.4);
+  max-height: 92vh;
+  overflow-y: auto;
 }
 .sheet__grab {
   width: 40px;

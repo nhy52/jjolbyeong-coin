@@ -1,16 +1,29 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { marketApi, type Order, type Product, type ProductInput } from '@/api/market'
+import {
+  marketApi,
+  type Order,
+  type Product,
+  type ProductInput,
+  type ProductRequest,
+} from '@/api/market'
 import { useMarketStream } from '@/composables/useMarketStream'
 import { ApiError } from '@/lib/http'
 
 const products = ref<Product[]>([])
 const orders = ref<Order[]>([])
+const requests = ref<ProductRequest[]>([])
 const loading = ref(true)
 const busyOrderId = ref<number | null>(null)
+const busyReqId = ref<number | null>(null)
 
-const tab = ref<'products' | 'orders'>('products')
+const tab = ref<'products' | 'orders' | 'requests'>('products')
 const pendingOrders = computed(() => orders.value.filter((o) => o.status === 'purchased'))
+const pendingRequests = computed(() => requests.value.filter((r) => r.status === 'pending'))
+
+// 거절 사유 시트
+const rejecting = ref<ProductRequest | null>(null)
+const rejectReason = ref('')
 
 // 상품 등록/수정 시트
 const editing = ref<Product | null>(null) // null = 신규
@@ -29,18 +42,31 @@ const formError = ref('')
 async function load() {
   loading.value = true
   try {
-    const [ps, os] = await Promise.all([marketApi.products(), marketApi.orders()])
+    const [ps, os, rs] = await Promise.all([
+      marketApi.products(),
+      marketApi.orders(),
+      marketApi.requests(),
+    ])
     products.value = ps
     orders.value = os
+    requests.value = rs
   } finally {
     loading.value = false
   }
+}
+
+function upsertRequest(r: ProductRequest) {
+  const i = requests.value.findIndex((x) => x.id === r.id)
+  if (i >= 0) requests.value[i] = r
+  else requests.value.unshift(r)
 }
 
 const { connect } = useMarketStream({
   onOrderCreated: (o) => {
     orders.value.unshift(o)
   },
+  onRequestCreated: upsertRequest,
+  onRequestUpdated: upsertRequest,
 })
 
 function openNew() {
@@ -138,10 +164,52 @@ async function fulfill(o: Order) {
   }
 }
 
+async function approveRequest(r: ProductRequest) {
+  busyReqId.value = r.id
+  try {
+    const updated = await marketApi.approveRequest(r.id)
+    upsertRequest(updated)
+    // 승인 시 생성된 상품을 상품 목록에도 반영
+    const ps = await marketApi.products()
+    products.value = ps
+  } catch (e) {
+    alert(e instanceof ApiError ? e.message : '승인에 실패했어요.')
+  } finally {
+    busyReqId.value = null
+  }
+}
+
+function openReject(r: ProductRequest) {
+  rejecting.value = r
+  rejectReason.value = ''
+}
+function closeReject() {
+  rejecting.value = null
+}
+async function confirmReject() {
+  if (!rejecting.value) return
+  busyReqId.value = rejecting.value.id
+  try {
+    const updated = await marketApi.rejectRequest(rejecting.value.id, rejectReason.value.trim() || null)
+    upsertRequest(updated)
+    closeReject()
+  } catch (e) {
+    alert(e instanceof ApiError ? e.message : '거절에 실패했어요.')
+  } finally {
+    busyReqId.value = null
+  }
+}
+
 const statusText: Record<string, string> = {
   on_sale: '판매중',
   sold_out: '품절',
   hidden: '숨김',
+}
+
+const reqStatusText: Record<string, string> = {
+  pending: '검토 대기',
+  approved: '승인됨',
+  rejected: '거절됨',
 }
 
 onMounted(async () => {
@@ -163,6 +231,9 @@ onMounted(async () => {
       </button>
       <button class="seg__btn" :class="{ 'seg__btn--on': tab === 'orders' }" @click="tab = 'orders'">
         주문 <span v-if="pendingOrders.length" class="badge">{{ pendingOrders.length }}</span>
+      </button>
+      <button class="seg__btn" :class="{ 'seg__btn--on': tab === 'requests' }" @click="tab = 'requests'">
+        신청 <span v-if="pendingRequests.length" class="badge">{{ pendingRequests.length }}</span>
       </button>
     </div>
 
@@ -195,7 +266,7 @@ onMounted(async () => {
     </template>
 
     <!-- 주문 관리 -->
-    <template v-else>
+    <template v-else-if="tab === 'orders'">
       <p v-if="!orders.length" class="empty">아직 들어온 주문이 없어요.</p>
       <div v-for="o in orders" :key="o.id" class="orow" :class="{ 'orow--done': o.status === 'fulfilled' }">
         <div class="prow__thumb">
@@ -215,6 +286,47 @@ onMounted(async () => {
           수령완료
         </button>
         <span v-else class="chip-done">✓ 완료</span>
+      </div>
+    </template>
+
+    <!-- 상품 신청 관리 -->
+    <template v-else>
+      <p v-if="!requests.length" class="empty">
+        아직 들어온 상품 신청이 없어요.<br />쫄병이 갖고 싶은 상품을 신청하면 여기 나타나요.
+      </p>
+      <div v-for="r in requests" :key="r.id" class="reqrow" :class="{ 'reqrow--done': r.status !== 'pending' }">
+        <div class="reqrow__top">
+          <div class="prow__thumb">
+            <img v-if="r.image_url" :src="r.image_url" :alt="r.name" />
+            <span v-else>📝</span>
+          </div>
+          <div class="prow__info">
+            <b class="prow__name">{{ r.name }}</b>
+            <small class="prow__meta">
+              {{ r.requester_name }} · 희망가 🪙 {{ r.desired_price.toLocaleString() }}
+            </small>
+          </div>
+          <span v-if="r.status !== 'pending'" class="chip-req" :class="`chip-req--${r.status}`">
+            {{ reqStatusText[r.status] }}
+          </span>
+        </div>
+
+        <p v-if="r.description" class="reqrow__desc">{{ r.description }}</p>
+        <a v-if="r.reference_url" class="reqrow__link" :href="r.reference_url" target="_blank" rel="noopener">
+          🔗 참고 링크
+        </a>
+        <p v-if="r.status === 'rejected' && r.reject_reason" class="reqrow__reason">
+          거절 사유: {{ r.reject_reason }}
+        </p>
+
+        <div v-if="r.status === 'pending'" class="reqrow__actions">
+          <button class="mini mini--fulfill" :disabled="busyReqId === r.id" @click="approveRequest(r)">
+            승인 → 등록
+          </button>
+          <button class="mini mini--del" :disabled="busyReqId === r.id" @click="openReject(r)">
+            거절
+          </button>
+        </div>
       </div>
     </template>
 
@@ -257,6 +369,35 @@ onMounted(async () => {
             {{ saving ? '저장 중…' : editing ? '수정 완료' : '상품 등록' }}
           </button>
           <button class="jc-btn jc-btn--ghost" @click="closeForm">취소</button>
+        </div>
+      </div>
+    </transition>
+
+    <!-- 신청 거절 사유 시트 -->
+    <transition name="sheet">
+      <div v-if="rejecting" class="sheet-wrap" @click.self="closeReject">
+        <div class="sheet">
+          <div class="sheet__grab" />
+          <p class="sheet__title">신청 거절</p>
+          <p class="reject__target">‘{{ rejecting.name }}’ 신청을 거절해요.</p>
+
+          <label class="jc-label">거절 사유 <span class="opt">(선택)</span></label>
+          <textarea
+            v-model="rejectReason"
+            class="jc-input area"
+            rows="2"
+            placeholder="쫄병에게 보여줄 사유를 적어주세요 (비워도 돼요)"
+            maxlength="255"
+          />
+
+          <button
+            class="jc-btn jc-btn--primary sheet__submit"
+            :disabled="busyReqId === rejecting.id"
+            @click="confirmReject"
+          >
+            거절하기
+          </button>
+          <button class="jc-btn jc-btn--ghost" @click="closeReject">취소</button>
         </div>
       </div>
     </transition>
@@ -439,6 +580,77 @@ onMounted(async () => {
   font-weight: 700;
   color: #0f8f52;
   flex-shrink: 0;
+}
+
+/* 상품 신청 */
+.reqrow {
+  padding: 12px 13px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  margin-bottom: 8px;
+}
+.reqrow--done {
+  opacity: 0.72;
+}
+.reqrow__top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.reqrow__desc {
+  margin: 10px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink-soft);
+  white-space: pre-wrap;
+}
+.reqrow__link {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--coral-deep);
+  text-decoration: none;
+}
+.reqrow__reason {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  color: var(--coral-deep);
+}
+.reqrow__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+.reqrow__actions .mini {
+  flex: 1;
+  padding: 10px 0;
+  text-align: center;
+}
+.chip-req {
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.chip-req--approved {
+  background: rgba(35, 194, 116, 0.15);
+  color: #0f8f52;
+}
+.chip-req--rejected {
+  background: #ffe9e5;
+  color: var(--coral-deep);
+}
+.reject__target {
+  margin: 0 0 14px;
+  font-size: 13.5px;
+  color: var(--ink-soft);
+}
+.opt {
+  color: var(--ink-faint);
+  font-weight: 400;
 }
 
 /* 시트 */

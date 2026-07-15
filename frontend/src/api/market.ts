@@ -2,6 +2,7 @@ import { api, tokens } from '@/lib/http'
 
 export type ProductStatus = 'on_sale' | 'sold_out' | 'hidden'
 export type OrderStatus = 'purchased' | 'fulfilled' | 'canceled'
+export type ProductRequestStatus = 'pending' | 'approved' | 'rejected'
 
 export interface Product {
   id: number
@@ -40,6 +41,30 @@ export interface PurchaseResult {
   product_id: number
   price_paid: number
   balance: number
+}
+
+export interface ProductRequest {
+  id: number
+  name: string
+  desired_price: number
+  description: string | null
+  image_url: string | null
+  reference_url: string | null
+  status: ProductRequestStatus
+  reject_reason: string | null
+  product_id: number | null
+  requester_user_id: number
+  requester_name: string
+  created_at: string
+  decided_at: string | null
+}
+
+export interface ProductRequestInput {
+  name: string
+  desired_price: number
+  description?: string | null
+  image_url?: string | null
+  reference_url?: string | null
 }
 
 /** 이미지 업로드 (multipart). http 래퍼는 JSON 전용이라 여기서 직접 fetch. */
@@ -84,4 +109,17 @@ export const marketApi = {
   purchase: (id: number) =>
     api<PurchaseResult>(`/market/shop/${id}/purchase`, { method: 'POST' }),
   myOrders: () => api<Order[]>('/market/my-orders'),
+
+  // 상품 신청 (쫄병 → 대장)
+  createRequest: (data: ProductRequestInput) =>
+    api<ProductRequest>('/market/requests', { method: 'POST', body: data }),
+  myRequests: () => api<ProductRequest[]>('/market/my-requests'),
+  requests: () => api<ProductRequest[]>('/market/requests'),
+  approveRequest: (id: number) =>
+    api<ProductRequest>(`/market/requests/${id}/approve`, { method: 'POST' }),
+  rejectRequest: (id: number, reason?: string | null) =>
+    api<ProductRequest>(`/market/requests/${id}/reject`, {
+      method: 'POST',
+      body: { reason: reason ?? null },
+    }),
 }

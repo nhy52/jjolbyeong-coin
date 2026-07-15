@@ -6,7 +6,13 @@ from datetime import datetime
 
 from pydantic import BaseModel, EmailStr, Field
 
-from app.models import OrderStatus, ProductStatus, UserRole, UserStatus
+from app.models import (
+    OrderStatus,
+    ProductRequestStatus,
+    ProductStatus,
+    UserRole,
+    UserStatus,
+)
 
 
 # ----- 인증 -----
@@ -143,3 +149,32 @@ class OrderOut(BaseModel):
     status: OrderStatus
     created_at: datetime
     fulfilled_at: datetime | None = None
+
+
+# ----- 대장마켓: 상품 신청(쫄병 → 대장) -----
+class ProductRequestCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    desired_price: int = Field(gt=0)  # 희망 가격(코인)
+    description: str | None = Field(default=None, max_length=2000)  # 신청 사유/설명
+    image_url: str | None = Field(default=None, max_length=500)  # 참고 이미지
+    reference_url: str | None = Field(default=None, max_length=500)  # 참고 링크
+
+
+class ProductRequestReject(BaseModel):
+    reason: str | None = Field(default=None, max_length=255)
+
+
+class ProductRequestOut(BaseModel):
+    id: int
+    name: str
+    desired_price: int
+    description: str | None = None
+    image_url: str | None = None
+    reference_url: str | None = None
+    status: ProductRequestStatus
+    reject_reason: str | None = None
+    product_id: int | None = None  # 승인 시 생성된 상품
+    requester_user_id: int
+    requester_name: str  # 프로필명 우선, 없으면 username
+    created_at: datetime
+    decided_at: datetime | None = None

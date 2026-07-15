@@ -57,6 +57,12 @@ class OrderStatus(str, enum.Enum):
     canceled = "canceled"
 
 
+class ProductRequestStatus(str, enum.Enum):
+    pending = "pending"
+    approved = "approved"
+    rejected = "rejected"
+
+
 class BittoSide(str, enum.Enum):
     buy = "buy"
     sell = "sell"
@@ -210,6 +216,40 @@ class Order(Base):
     fulfilled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class ProductRequest(Base):
+    """쫄병이 대장에게 '마켓에 올려달라'고 신청한 상품.
+
+    대장이 승인하면 이 신청 내용(이름·희망가격·설명·이미지)으로 Product를 자동 생성하고
+    product_id에 연결한다. 거절 시 reject_reason에 사유(선택)를 남긴다.
+    """
+
+    __tablename__ = "product_requests"
+
+    id: Mapped[int] = _pk()
+    group_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("groups.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    requester_user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    desired_price: Mapped[int] = mapped_column(BigInteger, nullable=False)  # 쫄병 희망가(코인)
+    description: Mapped[str | None] = mapped_column(Text)  # 신청 사유/설명
+    image_url: Mapped[str | None] = mapped_column(String(500))  # 참고 이미지
+    reference_url: Mapped[str | None] = mapped_column(String(500))  # 참고 링크
+    status: Mapped[ProductRequestStatus] = mapped_column(
+        Enum(ProductRequestStatus, native_enum=False, length=20),
+        default=ProductRequestStatus.pending,
+        nullable=False,
+    )
+    reject_reason: Mapped[str | None] = mapped_column(String(255))
+    product_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("products.id", ondelete="SET NULL"), nullable=True
+    )  # 승인 시 생성된 상품
+    created_at: Mapped[datetime] = _created_at()
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class BittoPrice(Base):
     __tablename__ = "bitto_prices"
 
@@ -251,6 +291,7 @@ __all__ = [
     "CoinTxType",
     "ProductStatus",
     "OrderStatus",
+    "ProductRequestStatus",
     "BittoSide",
     "Group",
     "User",
@@ -258,6 +299,7 @@ __all__ = [
     "Wallet",
     "CoinTransaction",
     "Product",
+    "ProductRequest",
     "Order",
     "BittoPrice",
     "BittoHolding",

@@ -1,12 +1,13 @@
 import { onUnmounted } from 'vue'
 import { tokens } from '@/lib/http'
-import type { Order, Product } from '@/api/market'
+import type { Order, Product, ProductRequest } from '@/api/market'
 
 /**
  * 대장마켓 실시간 이벤트 구독 컴포저블.
  *
  * - 쫄병: product.created / product.updated / product.deleted (상점 목록 갱신)
- * - 대장: order.created (신규 주문 알림)
+ *         request.updated (내 상품 신청 승인/거절 결과)
+ * - 대장: order.created (신규 주문), request.created / request.updated (상품 신청)
  *
  * SSE(EventSource)는 헤더를 못 실어 access token을 query로 전달한다.
  * (홈 화면의 useCoinStream과 별개 연결이지만, 이벤트 버스가 사용자당
@@ -17,6 +18,8 @@ export interface MarketHandlers {
   onProductUpdated?: (p: Product) => void
   onProductDeleted?: (productId: number) => void
   onOrderCreated?: (o: Order) => void
+  onRequestCreated?: (r: ProductRequest) => void
+  onRequestUpdated?: (r: ProductRequest) => void
 }
 
 export function useMarketStream(handlers: MarketHandlers) {
@@ -43,6 +46,14 @@ export function useMarketStream(handlers: MarketHandlers) {
     es.addEventListener('order.created', (e) => {
       const d = JSON.parse((e as MessageEvent).data)
       handlers.onOrderCreated?.(d.order as Order)
+    })
+    es.addEventListener('request.created', (e) => {
+      const d = JSON.parse((e as MessageEvent).data)
+      handlers.onRequestCreated?.(d.request as ProductRequest)
+    })
+    es.addEventListener('request.updated', (e) => {
+      const d = JSON.parse((e as MessageEvent).data)
+      handlers.onRequestUpdated?.(d.request as ProductRequest)
     })
   }
 

@@ -16,13 +16,16 @@ from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFil
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.deps import require_active, require_boss
+from app.core.deps import get_current_user, require_active, require_boss
 from app.models import User, UserRole
 from app.schemas import (
     ImageUploadResult,
     OrderOut,
     ProductCreate,
     ProductOut,
+    ProductRequestCreate,
+    ProductRequestOut,
+    ProductRequestReject,
     ProductUpdate,
     PurchaseResult,
 )
@@ -76,8 +79,9 @@ async def delete_product(
 
 @router.post("/upload", response_model=ImageUploadResult)
 async def upload_image(
-    file: UploadFile = File(...), boss: User = Depends(require_boss)
+    file: UploadFile = File(...), _user: User = Depends(get_current_user)
 ) -> ImageUploadResult:
+    # 대장(상품 이미지)·쫄병(신청 참고 이미지) 모두 사용하므로 로그인만 요구한다.
     ext = Path(file.filename or "").suffix.lower()
     if ext not in _ALLOWED_EXT:
         raise HTTPException(
@@ -139,3 +143,44 @@ async def purchase(
 @router.get("/my-orders", response_model=list[OrderOut])
 def my_orders(minion: User = Depends(_require_active_minion), db: Session = Depends(get_db)):
     return market.list_my_orders(db, minion.id)
+
+
+# ===== 상품 신청 (쫄병 → 대장) =====
+@router.post(
+    "/requests", response_model=ProductRequestOut, status_code=status.HTTP_201_CREATED
+)
+async def create_request(
+    data: ProductRequestCreate,
+    minion: User = Depends(_require_active_minion),
+    db: Session = Depends(get_db),
+):
+    return await market.create_request(db, minion, data)
+
+
+@router.get("/my-requests", response_model=list[ProductRequestOut])
+def my_requests(
+    minion: User = Depends(_require_active_minion), db: Session = Depends(get_db)
+):
+    return market.list_my_requests(db, minion)
+
+
+@router.get("/requests", response_model=list[ProductRequestOut])
+def list_requests(boss: User = Depends(require_boss), db: Session = Depends(get_db)):
+    return market.list_requests_for_boss(db, _require_group(boss))
+
+
+@router.post("/requests/{request_id}/approve", response_model=ProductRequestOut)
+async def approve_request(
+    request_id: int, boss: User = Depends(require_boss), db: Session = Depends(get_db)
+):
+    return await market.approve_request(db, _require_group(boss), request_id)
+
+
+@router.post("/requests/{request_id}/reject", response_model=ProductRequestOut)
+async def reject_request(
+    request_id: int,
+    data: ProductRequestReject,
+    boss: User = Depends(require_boss),
+    db: Session = Depends(get_db),
+):
+    return await market.reject_request(db, _require_group(boss), request_id, data.reason)
