@@ -6,7 +6,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, EmailStr, Field
 
-from app.models import UserRole, UserStatus
+from app.models import OrderStatus, ProductStatus, UserRole, UserStatus
 
 
 # ----- 인증 -----
@@ -89,3 +89,57 @@ class GroupSummary(BaseModel):
     total_minions: int
     active_minions: int
     pending_minions: int
+
+
+# ----- 대장마켓: 상품 -----
+class ProductCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    price_coin: int = Field(gt=0)
+    description: str | None = Field(default=None, max_length=2000)
+    image_url: str | None = Field(default=None, max_length=500)
+    stock: int | None = Field(default=None, ge=0)  # None = 무제한
+
+
+class ProductUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    price_coin: int | None = Field(default=None, gt=0)
+    description: str | None = Field(default=None, max_length=2000)
+    image_url: str | None = Field(default=None, max_length=500)
+    stock: int | None = Field(default=None, ge=0)
+    status: ProductStatus | None = None
+
+
+class ProductOut(BaseModel):
+    id: int
+    name: str
+    price_coin: int
+    description: str | None = None
+    image_url: str | None = None
+    status: ProductStatus
+    stock: int | None = None
+    created_at: datetime
+
+
+class ImageUploadResult(BaseModel):
+    image_url: str
+
+
+# ----- 대장마켓: 주문/구매 -----
+class PurchaseResult(BaseModel):
+    order_id: int
+    product_id: int
+    price_paid: int
+    balance: int  # 구매 후 잔액
+
+
+class OrderOut(BaseModel):
+    id: int
+    product_id: int
+    product_name: str
+    product_image_url: str | None = None
+    buyer_user_id: int
+    buyer_name: str  # 프로필명 우선, 없으면 username
+    price_paid: int
+    status: OrderStatus
+    created_at: datetime
+    fulfilled_at: datetime | None = None
